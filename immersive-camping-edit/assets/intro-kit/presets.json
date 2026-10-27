@@ -1,0 +1,152 @@
+{
+  "format": "camping-intro-presets-v1",
+  "usage": "These are module-relative templates, not a renderer timeline. Fill text slots, remove unknown optional layers, assign unique ids, add the chosen module start time to at, and adapt positions to actual 4:3 footage. Copy only resulting layer objects into timeline.overlays.",
+  "font": "system Chinese sans-serif Regular; macOS PingFang SC Regular",
+  "modules": {
+    "series_intro": {
+      "purpose": "实拍开场的系列与本期身份",
+      "slots": {
+        "series_name": "已有系列名；未知时可用 CAMPING DIARY",
+        "episode_title": "由本期真实内容确定的短标题"
+      },
+      "layers": [
+        {
+          "id": "series-name",
+          "type": "text",
+          "text": "{{series_name}}",
+          "at": 0,
+          "duration": 5.8,
+          "x": 0.08,
+          "y": 0.15,
+          "size": 0.019,
+          "align": "left",
+          "max_width": 0.65,
+          "fade_in": 0.4,
+          "fade_out": 0.4
+        },
+        {
+          "id": "episode-title",
+          "type": "text",
+          "text": "{{episode_title}}",
+          "at": 0.16,
+          "duration": 5.64,
+          "x": 0.08,
+          "y": 0.184,
+          "size": 0.032,
+          "align": "left",
+          "max_width": 0.65,
+          "fade_in": 0.4,
+          "fade_out": 0.4
+        },
+        {
+          "id": "series-rule",
+          "type": "line",
+          "at": 0.16,
+          "duration": 5.64,
+          "x": 0.08,
+          "y": 0.238,
+          "x2": 0.28,
+          "y2": 0.238,
+          "stroke": 0.0012,
+          "fade_in": 0.4,
+          "fade_out": 0.4
+        }
+      ]
+    },
+    "place_info": {
+      "purpose": "到达后介绍已知地点与可证实的当次条件",
+      "slots": {
+        "place": "用户确认的地点层级",
+        "conditions": "可选；有证据的日期、天气或温度，最多一行"
+      },
+      "optional_layers": {
+        "conditions": [
+          "conditions"
+        ]
+      },
+      "layers": [
+        {
+          "id": "place-rule",
+          "type": "line",
+          "at": 0,
+          "duration": 4.2,
+          "x": 0.08,
+          "y": 0.745,
+          "x2": 0.18,
+          "y2": 0.745,
+          "stroke": 0.0012,
+          "fade_in": 0.4,
+          "fade_out": 0.4
+        },
+        {
+          "id": "place",
+          "type": "text",
+          "text": "{{place}}",
+          "at": 0,
+          "duration": 4.2,
+          "x": 0.08,
+          "y": 0.765,
+          "size": 0.023,
+          "align": "left",
+          "max_width": 0.6,
+          "fade_in": 0.4,
+          "fade_out": 0.4
+        },
+        {
+          "id": "conditions",
+          "type": "text",
+          "text": "{{conditions}}",
+          "at": 0.12,
+          "duration": 4.08,
+          "x": 0.08,
+          "y": 0.803,
+          "size": 0.019,
+          "align": "left",
+          "max_width": 0.6,
+          "fade_in": 0.4,
+          "fade_out": 0.4
+        }
+      ]
+    },
+    "object_note": {
+      "purpose": "稳定物件旁提供有新增信息的短说明；全部坐标须按对象空位重设",
+      "slots": {
+        "object_note": "有依据的读数含义、使用信息等；画面已讲清时省略整个模块"
+      },
+      "optional_layers": {
+        "leader": [
+          "object-leader"
+        ]
+      },
+      "layers": [
+        {
+          "id": "object-note",
+          "type": "text",
+          "text": "{{object_note}}",
+          "at": 0,
+          "duration": 4,
+          "x": 0.62,
+          "y": 0.36,
+          "size": 0.021,
+          "align": "left",
+          "max_width": 0.3,
+          "fade_in": 0.4,
+          "fade_out": 0.4
+        },
+        {
+          "id": "object-leader",
+          "type": "line",
+          "at": 0,
+          "duration": 4,
+          "x": 0.57,
+          "y": 0.378,
+          "x2": 0.605,
+          "y2": 0.378,
+          "stroke": 0.0012,
+          "fade_in": 0.4,
+          "fade_out": 0.4
+        }
+      ]
+    }
+  }
+}

@@ -17,7 +17,8 @@ from grading.grade import color_filters, detail_filters
 
 FILTERS = {'scale', 'pad', 'crop', 'fps', 'overlay', 'fade', 'afade', 'amix',
            'atempo', 'volume', 'alimiter', 'apad', 'trim', 'atrim', 'adelay',
-           'tpad', 'setsar', 'setpts', 'asetpts', 'aresample', 'aformat', 'color', 'anullsrc', 'setparams', 'colorspace'}
+           'tpad', 'setsar', 'setpts', 'asetpts', 'aresample', 'aformat', 'color',
+           'anullsrc', 'setparams', 'colorspace', 'format', 'null'}
 
 IEC_TO_709 = ('colorspace=ispace=bt709:iprimaries=bt709:itrc=iec61966-2-4:irange=tv:'
               'space=bt709:primaries=bt709:trc=bt709:range=tv:format=yuv420p:fast=0')
@@ -126,6 +127,59 @@ def draw_caption(value, settings, path):
     canvas.save(path)
 
 
+def check_overlay_bounds(bounds, value, settings):
+    left, top, right, bottom = bounds
+    moving_bottom = bottom + value['move_y'] * settings['height']
+    if left < 0 or top < 0 or right > settings['width'] or moving_bottom > settings['height']:
+        raise ValueError(f'Overlay {value["id"]!r}: content or entry movement leaves the canvas')
+
+
+def overlay_text_layout(value, settings, draw):
+    size = max(1, round(settings['height'] * value['size']))
+    font = caption_font(settings, size)
+    lines = text_lines(value['text'], draw, font, settings['width'] * value['max_width'])
+    bounds = [draw.textbbox((0, 0), line, font=font) for line in lines]
+    padding = (round(size * 0.35), round(size * 0.16)) if value['background_alpha'] else (0, 0)
+    row_height = max(bottom-top for _, top, _, bottom in bounds) + 2 * padding[1]
+    return font, lines, bounds, padding, max(1, row_height), max(1, round(size * 0.18))
+
+
+def paint_overlay_text(draw, value, settings):
+    font, lines, boxes, (px, py), row_height, gap = overlay_text_layout(value, settings, draw)
+    anchor = {'left': 0, 'center': 0.5, 'right': 1}[value['align']]
+    y = round(value['y'] * settings['height'])
+    for line, (left, top, right, bottom) in zip(lines, boxes):
+        length = right-left
+        if length > settings['width'] * value['max_width']:
+            raise ValueError(f'Overlay {value["id"]!r}: glyph exceeds max_width')
+        x = round(value['x'] * settings['width'] - anchor * length)
+        check_overlay_bounds((x-px, y, x+length+px, y+row_height), value, settings)
+        if value['background_alpha'] and length:
+            draw.rectangle((x-px, y, x+length+px-1, y+row_height-1),
+                           fill=(0, 0, 0, round(255 * value['background_alpha'])))
+        draw.text((x-left, y+py-top), line, font=font, fill='white')
+        y += row_height+gap
+
+
+def paint_overlay_line(draw, value, settings):
+    width, height = settings['width'], settings['height']
+    points = [(round(value[x] * width), round(value[y] * height))
+              for x, y in [('x', 'y'), ('x2', 'y2')]]
+    stroke = max(1, round(value['stroke'] * height))
+    radius = (stroke + 1) // 2
+    xs, ys = zip(*points)
+    check_overlay_bounds((min(xs)-radius, min(ys)-radius, max(xs)+radius+1,
+                          max(ys)+radius+1), value, settings)
+    draw.line(points, fill='white', width=stroke)
+
+
+def overlay_image(value, settings):
+    canvas = Image.new('RGBA', (settings['width'], settings['height']))
+    painter = {'text': paint_overlay_text, 'line': paint_overlay_line}[value['type']]
+    painter(ImageDraw.Draw(canvas), value, settings)
+    return canvas
+
+
 def tempo(speed):
     factors = []
     while speed > 2:
@@ -228,12 +282,61 @@ def music_graph(timeline):
     return args, ';'.join(graph)
 
 
+def overlay_filters(value):
+    filters = ['format=rgba', 'setpts=PTS-STARTPTS']
+    if value['fade_in']:
+        filters.append(f'fade=t=in:st=0:d={value["fade_in"]:.9f}:alpha=1')
+    if value['fade_out']:
+        start = value['duration'] - value['fade_out']
+        filters.append(f'fade=t=out:st={start:.9f}:d={value["fade_out"]:.9f}:alpha=1')
+    filters.append(f'setpts=PTS+{value["at"]:.9f}/TB')
+    return ','.join(filters)
+
+
+def overlay_position(value, height):
+    if not value['move_y']:
+        return '0'
+    return (f'{value["move_y"] * height:.9f}*'
+            f'max(0,1-(t-{value["at"]:.9f})/{value["fade_in"]:.9f})')
+
+
+def overlay_graph(timeline, folder):
+    args, graph, picture = [], [], '0:v:0'
+    settings = timeline['output']
+    for index, layer in enumerate(timeline['overlays']):
+        name = f'overlay-{index:05d}.png'
+        overlay_image(layer, settings).save(folder / name)
+        args += ['-loop', '1', '-framerate', str(settings['fps']),
+                 '-t', str(layer['duration']), '-i', name]
+        source = 1 + len(timeline['music']) + index
+        graph.append(f'[{source}:v:0]{overlay_filters(layer)}[o{index}]')
+        end = layer['at'] + layer['duration']
+        active = f'gte(t,{layer["at"]:.9f})*lt(t,{end:.9f})'
+        y = overlay_position(layer, settings['height'])
+        graph.append(f'[{picture}][o{index}]overlay=x=0:y=\'{y}\':'
+                     f'enable=\'{active}\':eof_action=pass:repeatlast=0[v{index}]')
+        picture = f'v{index}'
+    return args, graph, f'[{picture}]'
+
+
+def final_video(timeline, folder):
+    if not timeline['overlays']:
+        return [], [], ['-map', '0:v:0', '-c:v', 'copy']
+    args, graph, picture = overlay_graph(timeline, folder)
+    encoding = ['-map', picture, '-c:v', 'libx264', '-threads', '2', '-preset', 'fast',
+                '-crf', '18', '-pix_fmt', 'yuv420p', '-color_primaries', 'bt709',
+                '-color_trc', 'bt709', '-colorspace', 'bt709', '-color_range', 'tv']
+    return args, graph, encoding
+
+
 def final_encode(binary, timeline, segments, folder, log):
     (folder / 'concat.txt').write_text(''.join(f"file '{name}'\n" for name in segments), encoding='utf-8')
     args = ['-f', 'concat', '-safe', '1', '-i', 'concat.txt']
-    music_args, graph = music_graph(timeline)
-    args += [*music_args, '-filter_complex', graph, '-map', '0:v:0', '-map', '[a]',
-             '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
+    music_args, audio = music_graph(timeline)
+    video_args, graphics, encoding = final_video(timeline, folder)
+    args += [*music_args, *video_args, '-filter_complex_threads', '2',
+             '-filter_complex', ';'.join([audio, *graphics]), *encoding, '-map', '[a]',
+             '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
              '-t', str(timeline['duration']), '-movflags', '+faststart', 'render.mp4']
     execute(binary, args, folder, log)
     return folder / 'render.mp4'
@@ -264,10 +367,14 @@ def run(args):
     started = time.monotonic()
     source = args.timeline.resolve()
     timeline = load(source)
+    for layer in timeline['overlays']:
+        overlay_image(layer, timeline['output'])
     output = destination(args.output, timeline, source)
     binary = choose_ffmpeg(args.ffmpeg)
     if args.check:
-        print(json.dumps({'valid': True, 'duration': timeline['duration'], 'clips': len(timeline['clips']), 'ffmpeg': binary}))
+        print(json.dumps({'valid': True, 'duration': timeline['duration'],
+                          'clips': len(timeline['clips']), 'overlays': len(timeline['overlays']),
+                          'ffmpeg': binary}))
         return
     render_all(args, timeline, output, source, binary, started)
 
@@ -297,13 +404,14 @@ def finish(result, output, source, timeline, folder, started):
     report = {'timeline': str(source), 'timeline_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
               'renderer_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               'timeline_module_sha256': hashlib.sha256(Path(__file__).with_name('timeline.py').read_bytes()).hexdigest(),
-              'timeline_extension': 'Version 1 supports crop_x from 0 (left) to 1 (right), default 0.5; effective for fit=cover',
+              'timeline_extension': 'Version 1 supports crop_x for fit=cover and independently timed text/line overlays',
               'color_conversion': {'source_metadata': [1, 11, 1], 'filter': IEC_TO_709,
                                    'applied_to': [key for key, value in timeline['sources'].items()
                                                   if value.get('color_metadata') == [1, 11, 1]]},
               'output': str(output), 'expected_duration': timeline['duration'], 'actual': actual,
               'elapsed_seconds': round(time.monotonic()-started, 2), 'work': str(folder),
               'sources': timeline['sources'],
+              'overlays': timeline['overlays'],
               'grade': timeline.get('grade_manifest'),
               'audio': 'Original audio plus explicit music; 48 kHz stereo, 10ms audio-only clip edge fades, peak limiter 0.95, AAC 192k',
               'review': 'Technical render only; visual continuity and listening review remain separate'}

@@ -172,9 +172,72 @@ def music_track(value, sources, duration, index):
                 **fades(value, end-start, label))
 
 
+def overlay_timing(value, settings, duration, label):
+    fps = settings['fps']
+    at = number(value['at'], label + '.at', 0)
+    length = number(value['duration'], label + '.duration', 0.001)
+    start_frame, frames = round(at * fps), max(1, round(length * fps))
+    if start_frame + frames > round(duration * fps):
+        raise ValueError(f'{label}: extends beyond timeline end after frame quantization')
+    length = float(frames / fps)
+    result = dict(at=float(start_frame / fps), duration=length,
+                  **fades(value, length, label))
+    result['move_y'] = number(value.get('move_y', 0), label + '.move_y', 0, 1)
+    if result['move_y'] and not result['fade_in']:
+        raise ValueError(f'{label}: move_y requires fade_in > 0')
+    return result
+
+
+def overlay_text(value, label):
+    if not isinstance(value['text'], str) or not value['text'].strip():
+        raise ValueError(f'{label}.text must contain text')
+    align = value.get('align', 'left')
+    if align not in ('left', 'center', 'right'):
+        raise ValueError(f'{label}.align: left, center or right')
+    return dict(text=value['text'], align=align,
+                size=number(value['size'], label + '.size', 0.001, 1),
+                max_width=number(value.get('max_width', 0.72), label + '.max_width', 0.001, 1),
+                background_alpha=number(value.get('background_alpha', 0),
+                                        label + '.background_alpha', 0, 1))
+
+
+def overlay_line(value, label):
+    result = {key: number(value[key], f'{label}.{key}', 0, 1) for key in ('x2', 'y2')}
+    if value['x'] == result['x2'] and value['y'] == result['y2']:
+        raise ValueError(f'{label}: line endpoints must differ')
+    result['stroke'] = number(value.get('stroke', 0.0015), label + '.stroke', 0.0001, 1)
+    return result
+
+
+def overlay(value, settings, duration, index):
+    label = f'overlays[{index}]'
+    if not isinstance(value, dict) or value.get('type') not in ('text', 'line'):
+        raise ValueError(f'{label}.type: text or line')
+    common = {'id', 'type', 'at', 'duration', 'x', 'y'}
+    required = {'text', 'size'} if value['type'] == 'text' else {'x2', 'y2'}
+    optional = {'align', 'max_width', 'background_alpha'} if value['type'] == 'text' else {'stroke'}
+    fields(value, common | required | optional | {'fade_in', 'fade_out', 'move_y'},
+           common | required, label)
+    if not isinstance(value['id'], str) or not value['id'].strip():
+        raise ValueError(f'{label}.id must contain a unique name')
+    position = {key: number(value[key], f'{label}.{key}', 0, 1) for key in ('x', 'y')}
+    content = {'text': overlay_text, 'line': overlay_line}[value['type']](value, label)
+    return dict(id=value['id'], type=value['type'], **position, **content,
+                **overlay_timing(value, settings, duration, label))
+
+
+def overlays(values, settings, duration):
+    if not isinstance(values, list):
+        raise ValueError('overlays must be an array')
+    result = [overlay(value, settings, duration, i) for i, value in enumerate(values)]
+    if len({item['id'] for item in result}) != len(result):
+        raise ValueError('overlays.id values must be unique')
+    return result
+
+
 def load(path):
     data = json.loads(path.read_text(encoding='utf-8'))
-    fields(data, {'version', 'sources', 'output', 'clips', 'music'},
+    fields(data, {'version', 'sources', 'output', 'clips', 'music', 'overlays'},
            {'version', 'sources', 'output', 'clips'}, 'timeline')
     if type(data['version']) is not int or data['version'] != 1:
         raise ValueError('Only timeline version 1 is supported')
@@ -187,7 +250,9 @@ def load(path):
     clips = [clip(value, sources, settings, i) for i, value in enumerate(data['clips'])]
     total = sum(item['frames'] for item in clips) / float(settings['fps'])
     music = [music_track(v, sources, total, i) for i, v in enumerate(data.get('music', []))]
-    return {'sources': sources, 'output': settings, 'clips': clips, 'music': music, 'duration': total}
+    layers = overlays(data.get('overlays', []), settings, total)
+    return {'sources': sources, 'output': settings, 'clips': clips, 'music': music,
+            'overlays': layers, 'duration': total}
 
 
 def source_for(value, sources, label):
