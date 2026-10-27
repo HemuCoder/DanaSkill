@@ -26,7 +26,7 @@ python "$SKILL_DIR/scripts/render.py" timeline.json --output outputs/episode.mp4
     {
       "source": "setup", "in": 12.4, "out": 19.6,
       "fit": "contain", "gain_db": 0,
-      "caption": {"text": "桌子搭好了", "style": "diary", "position": "bottom"}
+      "caption": {"text": "旁注示例", "style": "diary", "position": "bottom"}
     },
     {
       "source": "enjoy", "in": 4, "out": 12,
@@ -42,7 +42,7 @@ python "$SKILL_DIR/scripts/render.py" timeline.json --output outputs/episode.mp4
 }
 ```
 
-样例仅展示结构；先从真实素材里验证出入点和字幕内容。可不提供 `music`。所有未列出的字段都会报错，避免忽略尚未实现的效果。
+样例仅展示结构，“旁注示例”为占位文字；先从真实素材里验证出入点，按 [文案规则](style-guide.md#字幕与文案) 判断是否需要旁注并另写内容。可不提供 `music`。所有未列出的字段都会报错，避免忽略尚未实现的效果。
 
 ## 字段
 
