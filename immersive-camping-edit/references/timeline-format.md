@@ -50,7 +50,7 @@ python "$SKILL_DIR/scripts/render.py" timeline.json --output outputs/episode.mp4
 
 - `sources` 是 ID 到文件路径的映射。相对路径以 JSON 所在目录为基准；可使用绝对路径。列出实际使用的素材。原文件保持只读。
 - `output.width/height` 是 16–7680 范围内的偶数；`fps` 支持 `30` 或 `"30000/1001"` 等帧率，范围 1–120。遵守用户指定的画幅，默认参考画幅 4:3；根据源清晰度选择输出分辨率。
-- `output.font` 可指定支持中文的字体文件。相对路径同样以 JSON 所在目录为基准；未指定时优先系统黑体细体（本机 Heiti SC Light），再找黑体或 Noto CJK。实际字体记入交接记录。缺少字体时明确失败。
+- `output.font` 可指定支持中文的字体文件。相对路径同样以 JSON 所在目录为基准；未指定时优先系统苹方简体常规（PingFang SC Regular），再找系统黑体或 Noto CJK 常规。实际字体记入交接记录。缺少字体时明确失败。
 - `clips` 按成片顺序排列，至少一段。视频段必填 `source/in/out`；黑场段必填 `black: true` 和正数 `duration`。
 - `in/out` 单位为秒，区间左闭右开。视频片段以该源视频流的播放起点为零；音乐以源音频流的播放起点为零。不要把文件中的绝对 PTS 当作出入点。非零起始 PTS 会被换算，源内音视频起点差通过补静音保持。
 - 视频段的 `speed` 默认 `1`，支持 `0.125–8`；镜头时长为 `(out-in)/speed`，再量化到成片帧数。使用 `atempo` 同步变速音频并保持音高，极端变速仍需听审。需要移除该段原声时显式设 `mute: true`。

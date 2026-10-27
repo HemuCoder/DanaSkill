@@ -57,21 +57,26 @@ def execute(binary, args, folder, log):
 
 
 def font_path(settings):
-    paths = [settings.get('font'), '/System/Library/Fonts/STHeiti Light.ttc',
+    mac_fonts = sorted(Path('/System/Library/AssetsV2').glob(
+        'com_apple_MobileAsset_Font*/*.asset/AssetData/PingFang.ttc'))
+    paths = [settings.get('font'), '/System/Library/Fonts/PingFang.ttc', *mac_fonts,
              '/System/Library/Fonts/STHeiti Medium.ttc',
              '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
              'C:/Windows/Fonts/msyh.ttc']
     path = next((p for p in paths if p and Path(p).is_file()), None)
     if not path:
         raise ValueError('Chinese captions require output.font pointing to a suitable font')
-    return path
+    return str(path)
 
 
 def caption_font(settings, size):
     path = font_path(settings)
-    simplified = {'/System/Library/Fonts/STHeiti Light.ttc',
-                  '/System/Library/Fonts/STHeiti Medium.ttc'}
-    return ImageFont.truetype(path, size, index=int(str(path) in simplified))
+    index = {'PingFang.ttc': 3, 'STHeiti Light.ttc': 1,
+             'STHeiti Medium.ttc': 1}.get(Path(path).name, 0)
+    font = ImageFont.truetype(path, size, index=index)
+    if Path(path).name == 'PingFang.ttc' and font.getname() != ('PingFang SC', 'Regular'):
+        raise ValueError('Verify this system PingFang collection has SC Regular at index 3')
+    return font
 
 
 def text_lines(text, draw, font, width):
