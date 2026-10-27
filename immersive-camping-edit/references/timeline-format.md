@@ -28,7 +28,6 @@ python "$SKILL_DIR/scripts/render.py" timeline.json --output outputs/episode.mp4
       "fit": "contain", "gain_db": 0,
       "caption": {"text": "桌子搭好了", "style": "diary", "position": "bottom"}
     },
-    {"black": true, "duration": 0.5},
     {
       "source": "enjoy", "in": 4, "out": 12,
       "fade_in": 0.3, "fade_out": 0.5
@@ -51,14 +50,14 @@ python "$SKILL_DIR/scripts/render.py" timeline.json --output outputs/episode.mp4
 
 - `sources` 是 ID 到文件路径的映射。相对路径以 JSON 所在目录为基准；可使用绝对路径。列出实际使用的素材。原文件保持只读。
 - `output.width/height` 是 16–7680 范围内的偶数；`fps` 支持 `30` 或 `"30000/1001"` 等帧率，范围 1–120。遵守用户指定的画幅，默认参考画幅 4:3；根据源清晰度选择输出分辨率。
-- `output.font` 可指定支持中文的字体文件。相对路径同样以 JSON 所在目录为基准；未指定时寻找系统黑体或 Noto CJK。缺少字体时明确失败。
+- `output.font` 可指定支持中文的字体文件。相对路径同样以 JSON 所在目录为基准；未指定时优先系统黑体细体（本机 Heiti SC Light），再找黑体或 Noto CJK。实际字体记入交接记录。缺少字体时明确失败。
 - `clips` 按成片顺序排列，至少一段。视频段必填 `source/in/out`；黑场段必填 `black: true` 和正数 `duration`。
 - `in/out` 单位为秒，区间左闭右开。视频片段以该源视频流的播放起点为零；音乐以源音频流的播放起点为零。不要把文件中的绝对 PTS 当作出入点。非零起始 PTS 会被换算，源内音视频起点差通过补静音保持。
 - 视频段的 `speed` 默认 `1`，支持 `0.125–8`；镜头时长为 `(out-in)/speed`，再量化到成片帧数。使用 `atempo` 同步变速音频并保持音高，极端变速仍需听审。需要移除该段原声时显式设 `mute: true`。
 - 视频段的 `gain_db` 默认 `0`，允许 `-96–24` dB。它调整原声；不自动根据“声音类型”删掉声音。
 - `fit` 默认 `contain`，完整保留画面并留黑边；`cover` 填满并裁切。视频段可设 `crop_x`，范围 `0–1`、默认 `0.5`，在 `cover` 时按 `(iw-ow)*crop_x` 定位水平裁切窗口，`0/0.5/1` 分别为左/中/右对齐，垂直居中。这是逐镜静态构图；使用前后均需检查手、器具与动作结果是否保留。需要动态重构图时另用关键帧工具。
 - `fade_in/fade_out` 单位是成片秒数，同时作用于该段画面和原声，包含已叠字幕。淡变区间不能重叠。每段原声另有首尾各 10ms 的音频淡化，短于 20ms 的片段缩短为半段时长，以降低切音边缘的不连续；它不改变画面，也不代替相邻镜头交叉混音或听审。黑场可放在两个完整动作段之间。
-- `caption` 支持 `text`、`position`、`style`；默认底部 `bottom`、日记 `diary`。位置可为 `top/center/bottom`，样式可为 `diary/label`。日记字幕白字深色半透明底，标签白字透明底。最多自动换行 3 行。文字在整个片段出现，若需局部出现，将连续源区间拆成相邻片段。
+- `caption` 支持 `text`、`position`、`style`；默认底部 `bottom`、日记 `diary`。位置可为 `top/center/bottom`，样式可为 `diary/label`。日记字幕白字深色半透明底，标签白字透明底。正文约 2.4% 画面高度、标签约 2.8%；最大文字宽度 72%，最多自动换行 2 行，超出须精简或分时显示。底部黑底下沿距底约 9% 高度；完整规格见 [字幕与文案](style-guide.md#字幕与文案)。文字在整个片段出现，若需局部出现，将连续源区间拆成相邻片段。
 - `music` 是可选数组。每段必填 `source/in/out/at/gain_db`；`at` 是成片入点，其他时间单位均为秒，可选音频 `fade_in/fade_out`。音乐必须完全落在成片内；不会自动循环或自动选曲。只有显式列出的音源被混入。
 
 ## 颜色、方向和音轨

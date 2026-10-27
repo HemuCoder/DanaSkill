@@ -57,13 +57,21 @@ def execute(binary, args, folder, log):
 
 
 def font_path(settings):
-    paths = [settings.get('font'), '/System/Library/Fonts/STHeiti Medium.ttc',
+    paths = [settings.get('font'), '/System/Library/Fonts/STHeiti Light.ttc',
+             '/System/Library/Fonts/STHeiti Medium.ttc',
              '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
              'C:/Windows/Fonts/msyh.ttc']
     path = next((p for p in paths if p and Path(p).is_file()), None)
     if not path:
         raise ValueError('Chinese captions require output.font pointing to a suitable font')
     return path
+
+
+def caption_font(settings, size):
+    path = font_path(settings)
+    simplified = {'/System/Library/Fonts/STHeiti Light.ttc',
+                  '/System/Library/Fonts/STHeiti Medium.ttc'}
+    return ImageFont.truetype(path, size, index=int(str(path) in simplified))
 
 
 def text_lines(text, draw, font, width):
@@ -76,28 +84,40 @@ def text_lines(text, draw, font, width):
                 line = ''
             line += char
         lines.append(line)
-    if len(lines) > 3:
-        raise ValueError('Caption exceeds 3 lines; shorten it or split the clip')
+    if len(lines) > 2:
+        raise ValueError('Caption exceeds 2 lines; shorten it or split the clip')
     return lines
+
+
+def paint_caption_line(draw, line, font, width, y, row_height, padding, background):
+    left, top, right, bottom = draw.textbbox((0, 0), line, font=font)
+    length = right-left
+    x = round((width-length)/2)
+    if background:
+        draw.rectangle((x-padding, y, x+length+padding-1, y+row_height-1),
+                       fill=(0, 0, 0, 135))
+    draw.text((x-left, y+(row_height-(bottom-top))/2-top), line,
+              font=font, fill='white', stroke_width=0)
 
 
 def draw_caption(value, settings, path):
     width, height = settings['width'], settings['height']
     canvas = Image.new('RGBA', (width, height))
     draw = ImageDraw.Draw(canvas)
-    size = max(12, round(height * (0.026 if value['style'] == 'diary' else 0.032)))
-    font = ImageFont.truetype(font_path(settings), size)
-    lines = text_lines(value['text'], draw, font, width * 0.84)
-    step = round(size * 1.4)
-    block = len(lines) * step
-    y = {'top': height * 0.07, 'center': (height-block)/2, 'bottom': height * 0.91-block}[value['position']]
+    diary = value['style'] == 'diary'
+    size = max(1, round(height * (0.024 if diary else 0.028)))
+    font = caption_font(settings, size)
+    lines = text_lines(value['text'], draw, font, width * 0.72)
+    _, top, _, bottom = draw.textbbox((0, 0), '国Ag', font=font)
+    row_height = bottom-top+2*max(1, round(size*0.16))
+    gap = max(1, round(size*0.12))
+    block = len(lines)*row_height+(len(lines)-1)*gap
+    y = round({'top': height*0.07, 'center': (height-block)/2,
+               'bottom': height*0.91-block}[value['position']])
     for line in lines:
-        length = draw.textlength(line, font=font)
-        x = (width-length)/2
-        if value['style'] == 'diary':
-            draw.rectangle((x-8, y-2, x+length+8, y+step), fill=(0, 0, 0, 135))
-        draw.text((x, y), line, font=font, fill='white', stroke_width=0)
-        y += step
+        paint_caption_line(draw, line, font, width, y, row_height,
+                           max(1, round(size*0.35)), diary)
+        y += row_height+gap
     canvas.save(path)
 
 
