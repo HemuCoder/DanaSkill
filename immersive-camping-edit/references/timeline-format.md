@@ -2,7 +2,7 @@
 
 导航：[调用](#调用) · [字段](#字段) · [独立介绍层](#独立介绍层) · [颜色、方向和音轨](#颜色方向和音轨) · [输出与复核](#输出与复核)
 
-用 `scripts/render.py` 将明确选择的片段渲染为 SDR H.264/AAC MP4。JSON 是可编辑、可复现的剪辑清单；它不是剪映、Premiere 或 Resolve 原生工程。复杂调色、J/L cut、独立环境声铺底、交叉叠化和关键帧裁切应在支持这些功能的工具里完成，并保留工程与出入点记录。
+默认在剪映内预览与交付。用户要求视频导出或确需短段技术测试时，用 `scripts/render.py` 将明确选择的片段渲染为 SDR H.264/AAC MP4。JSON 是可编辑、可复现的剪辑清单；它不是剪映、Premiere 或 Resolve 原生工程。复杂调色、J/L cut、独立环境声铺底、交叉叠化和关键帧裁切应在支持这些功能的工具里完成，并保留工程与出入点记录。
 
 ## 调用
 
@@ -50,7 +50,7 @@ python "$SKILL_DIR/scripts/render.py" timeline.json --output outputs/episode.mp4
 
 顶层必填 `version`、`sources`、`output`、`clips`；可选 `music`、`overlays`。`version` 固定为整数 `1`。
 
-- `sources` 是 ID 到文件路径的映射。相对路径以 JSON 所在目录为基准；可使用绝对路径。列出实际使用的素材。原文件保持只读。
+- `sources` 是 ID 到文件路径的映射。相对路径以 JSON 所在目录为基准；可使用绝对路径。列出时间线实际使用的素材。原文件保持只读；完整素材库另由 inventory 与 media-map 覆盖全部媒体，未用素材留在剪映素材库。
 - `output.width/height` 是 16–7680 范围内的偶数；`fps` 支持 `30` 或 `"30000/1001"` 等帧率，范围 1–120。遵守用户指定的画幅，默认交付画幅 4:3；根据源清晰度选择输出分辨率。
 - `output.font` 可指定支持中文的字体文件。相对路径同样以 JSON 所在目录为基准；未指定时优先系统苹方简体常规（PingFang SC Regular），再找系统黑体或 Noto CJK 常规。实际字体记入交接记录。缺少字体时明确失败。
 - `clips` 按成片顺序排列，至少一段。视频段必填 `source/in/out`；黑场段必填 `black: true` 和正数 `duration`。
@@ -108,6 +108,8 @@ python "$SKILL_DIR/scripts/render.py" timeline.json --output outputs/episode.mp4
 含介绍层时，最终合并后再次编码画面为 H.264；无介绍层保持原视频流复制路径。图层在逐片段处理后叠加，因此底片已有的淡出不会自动带走介绍层，须单独设置它的退出。报告记录规范化图层参数；工作目录保留各透明 PNG 与日志，文字内容和时序仍以 JSON 为准。PNG 只用于辅助渲染，剪映的可编辑文字按 [介绍层交接](jianying-project.md#介绍层与动效交接) 单独生成和验证。
 
 ## 颜色、方向和音轨
+
+本节规范化仅作用于辅助渲染输入，剪映工程仍按 [原片区间约定](jianying-project.md#原片区间与调整余量) 保持完整原片引用和可调整范围。
 
 当前渲染器用于已确认的 SDR BT.709、方形像素素材。另支持原色/传递函数/矩阵元数据精确为 `[1,11,1]` 的 IEC61966-2-4 素材，逐镜缩放后使用完整 `colorspace` 转换到 BT.709：`ispace=bt709:iprimaries=bt709:itrc=iec61966-2-4:irange=tv:space=bt709:primaries=bt709:trc=bt709:range=tv:format=yuv420p:fast=0`。该路径按有限范围输入处理，使用前核对来源和样片。转换会改变像素，不只改标签。
 
