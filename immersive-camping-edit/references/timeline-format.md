@@ -51,7 +51,7 @@ python "$SKILL_DIR/scripts/render.py" timeline.json --output outputs/episode.mp4
 顶层必填 `version`、`sources`、`output`、`clips`；可选 `music`、`overlays`。`version` 固定为整数 `1`。
 
 - `sources` 是 ID 到文件路径的映射。相对路径以 JSON 所在目录为基准；可使用绝对路径。列出实际使用的素材。原文件保持只读。
-- `output.width/height` 是 16–7680 范围内的偶数；`fps` 支持 `30` 或 `"30000/1001"` 等帧率，范围 1–120。遵守用户指定的画幅，默认参考画幅 4:3；根据源清晰度选择输出分辨率。
+- `output.width/height` 是 16–7680 范围内的偶数；`fps` 支持 `30` 或 `"30000/1001"` 等帧率，范围 1–120。遵守用户指定的画幅，默认交付画幅 4:3；根据源清晰度选择输出分辨率。
 - `output.font` 可指定支持中文的字体文件。相对路径同样以 JSON 所在目录为基准；未指定时优先系统苹方简体常规（PingFang SC Regular），再找系统黑体或 Noto CJK 常规。实际字体记入交接记录。缺少字体时明确失败。
 - `clips` 按成片顺序排列，至少一段。视频段必填 `source/in/out`；黑场段必填 `black: true` 和正数 `duration`。
 - `in/out` 单位为秒，区间左闭右开。视频片段以该源视频流的播放起点为零；音乐以源音频流的播放起点为零。不要把文件中的绝对 PTS 当作出入点。非零起始 PTS 会被换算，源内音视频起点差通过补静音保持。

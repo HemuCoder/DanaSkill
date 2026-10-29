@@ -1,4 +1,4 @@
 interface:
   display_name: "沉浸式露营剪辑"
-  short_description: "可编辑剪映粗剪、情境配乐与逐镜调色，保留原片和独立字幕"
-  default_prompt: "使用 $immersive-camping-edit 剪辑我提供的露营素材，按事件安排舒缓配乐与原声留白，先交付剪映可编辑粗剪和审片视频；我修改保存后，再按最新工程逐镜调色。"
+  short_description: "按真实事件剪出生活过程，保留动作原声、日记旁注与可编辑剪映工程"
+  default_prompt: "使用 $immersive-camping-edit 剪辑我提供的露营素材，按真实事件保留动作与生活落点，安排舒缓配乐、现场原声和自然日记旁注，交付剪映可编辑工程与审片视频。"
