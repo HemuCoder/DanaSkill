@@ -4,9 +4,11 @@
 
 ## 第一次交接：可编辑粗剪
 
-完成全片剪辑、原声与独立字幕，交付在本机验证过的剪映工程和备份，记录工程位置供用户直接预览。素材库保留完整媒体和未用素材，时间线使用完整原片的选定区间并保留可调整余量，按 [工程约定](jianying-project.md#完整素材库) 完成导入、使用标识和片段试调验证。默认保持 4:3。用户在剪映修改素材、片段、字幕、音频、特效和构图；收到“已保存，开始调色”之类的明确指令后进入第二阶段。
+完成全片剪辑、原声与独立字幕，交付在本机验证过的剪映工程和备份，记录工程位置供用户直接预览。素材库保留完整媒体和未用素材，高光、简介底片、正文与空镜视频统一位于剪映主视频轨道，使用完整原片的选定区间并保留可调整余量，按 [工程约定](jianying-project.md#完整素材库) 完成导入、使用标识和片段试调验证。默认保持 4:3。用户在剪映修改素材、片段、字幕、音频、特效和构图；收到“已保存，开始调色”之类的明确指令后进入第二阶段。
 
-在本期目录保存一个 `handoff.json`，记录工程及主时间线 ID、剪映版本、工程位置、交接快照、时间线哈希、当前阶段和已验证能力。已有素材映射与原生片段 ID 可直接复用，无需另建数据库。
+首次交接包含片头高光、居中的独立 `IN THIS EPISODE...` 文字和高光后的中英简介。主题、营地/地点等必要信息缺失时集中询问并记录，其他素材工作继续推进。文字样式按 [统一规格](style-guide.md#统一文字规格) 实施，全部文案渐显 0.8 秒、渐隐 0.5 秒，跨镜持续、位置静态；按 [主轨道与片头验收](review.md#主轨道与片头文字验收) 检查面板值、预览与保存重开。
+
+在本期目录保存一个 `handoff.json`，记录工程、主时间线与主视频轨道 ID、剪映版本、工程位置、交接快照、时间线哈希、当前阶段及已验证能力。高光、中英简介和文字样式的计划与实际验证状态分别保留。已有素材映射与原生片段 ID 可直接复用，无需另建数据库。
 
 ## 第二次交接：以最新工程为准
 
@@ -23,12 +25,13 @@
 {
   "version": 1,
   "stage": "awaiting_user_edit",
-  "project": {"path": "本机工程目录", "id": "工程ID", "main_timeline_id": "主时间线ID", "app_version": "实际版本"},
+  "project": {"path": "本机工程目录", "id": "工程ID", "main_timeline_id": "主时间线ID", "main_video_track_id": "已在剪映确认的主视频轨道ID", "app_version": "实际版本"},
   "snapshot": {"path": "交接快照", "sha256": "快照哈希", "captured_at": "时间", "readable": true},
   "timeline_sha256": "当前可读取时间线的哈希",
   "media_map": "完整素材库与时间线使用映射的位置",
+  "opening": {"plan": "intro-plan.json", "facts_status": "pending", "highlight_status": "unverified", "bilingual_intro_status": "unverified", "text_checks": {"panel_readback": "unverified", "image": "unverified", "animation": "unverified", "reopen": "unverified"}},
   "grading": {"plan": null, "native_status": "not_applied", "style_status": "pending", "written_segment_ids": [], "checks": {"image": "unverified", "panel_readback": "unverified", "manual_edit_save": "unverified", "reopen": "unverified"}},
-  "capabilities": {"full_media_bin": "unverified", "usage_marks": "unverified", "source_range_edit": "unverified", "initial_segment_color_write": "unverified", "latest_project_readback": "unverified", "latest_segment_color_write": "unverified"}
+  "capabilities": {"main_video_track": "unverified", "full_media_bin": "unverified", "usage_marks": "unverified", "source_range_edit": "unverified", "initial_segment_color_write": "unverified", "latest_project_readback": "unverified", "latest_segment_color_write": "unverified"}
 }
 ```
 
@@ -36,6 +39,6 @@
 
 ## 当前可验证的范围
 
-首次原生片段参数写入已有工程应用及保存重开证据，最新编码工程的正式回读和人工改稿回写尚未验证可用。具体路径统一见 [调色能力边界](color-grade.md#本机验证边界)。每次交接分别记录实际画面、面板读回、手工改值保存和持久性；将风格交给用户审核时记录本次待确认项。
+首次原生片段参数写入已有工程应用及保存重开证据，最新编码工程的正式回读和人工改稿回写尚未验证可用。具体路径统一见 [调色能力边界](color-grade.md#本机验证边界)。主轨道、片头及文字参数属于目标规格，可用能力以本次工程中的实际检查为准。每次交接分别记录实际画面、面板读回、手工改值保存和持久性；将风格交给用户审核时记录本次待确认项。
 
 最新结构无法取得时保留用户保存的工程，将阶段保持为 `ready_for_grade` 并记录具体缺口。用户要求历史版本的视频时，可按其历史时间线导出并标明版本，人工修改的最新工程继续保持原样。烘焙成片或替换调色代理也不能标记为“原生片段调色完成”。
