@@ -29,7 +29,11 @@
         "enabled": true,
         "opacity_percent": null,
         "blur": null,
-        "adjustment": "Tune opacity and blur against bright and dark footage; record actual UI values."
+        "adjustment": "Choose the lowest readable opacity within 20–55% for the footage covered by each text group; soften edges with blur, review across cuts, and record actual UI values.",
+        "opacity_percent_range": [
+          20,
+          55
+        ]
       },
       "missing_chinese_glyphs": "Use system Chinese Regular for missing Chinese glyphs and record actual font families."
     },
