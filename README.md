@@ -2,6 +2,18 @@
 
 可复用的个人 Codex Skills。
 
+## Impeccable 界面设计
+
+[impeccable](impeccable/SKILL.md) 提供界面设计、布局、审查与打磨流程。此处保存本机定制的 `4.5.2 / explicit-device-scope.1`：Web 默认只处理桌面，手机和平板仅在用户明确要求时加入；构建、截图和审查共用同一设备范围，验证按批次收敛。
+
+```sh
+npx skills add HemuCoder/DanaSkill --skill impeccable
+```
+
+随附 Apple Silicon Mac 的定制引擎 `0.1.14`，以及[源码补丁与重建脚本](impeccable/scripts/engine-scope/README.md)。其他平台需先按该说明构建并替换对应引擎；启动器默认找到或下载的官方引擎尚未包含这项修改，仍可能要求手机截图。官方更新也可能覆盖本地定制。
+
+上游为 Paul Bakaus 的 [pbakaus/impeccable](https://github.com/pbakaus/impeccable)，遵循 [Apache-2.0](impeccable/LICENSE)；本地改动及第三方归属见 [NOTICE](impeccable/NOTICE.md)。
+
 ## 沉浸式露营剪辑
 
 [immersive-camping-edit](immersive-camping-edit/SKILL.md) 将本地露营素材剪成有真实动作、现场感和自然日记旁注的生活影像。新会话依据 Skill 与本期素材即可开始工作。

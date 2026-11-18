@@ -1,0 +1,742 @@
+diff --git a/crates/cli/src/capture_service.rs b/crates/cli/src/capture_service.rs
+index 61334ad..4320e7e 100644
+--- a/crates/cli/src/capture_service.rs
++++ b/crates/cli/src/capture_service.rs
+@@ -180,6 +180,7 @@ pub fn serve(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+                         spec: text("spec")?.into(),
+                         reference: text("reference")?.into(),
+                         stage,
++                        devices: impeccable_comp_verbs::web_devices::parse(body["devices"].as_str())?,
+                     })?;
+                     serial += 1;
+                     let handle = format!("{session}-{serial}");
+@@ -461,7 +462,8 @@ impl EntryRenderer for RemoteEntryRenderer {
+         };
+         let result = self.call(
+             "/capture",
+-            json!({"entry":r.artifact,"spec":r.spec,"reference":r.reference,"stage":stage}),
++            json!({"entry":r.artifact,"spec":r.spec,"reference":r.reference,"stage":stage,
++                "devices":r.devices.iter().map(|d| d.name()).collect::<Vec<_>>().join(",")}),
+         )?;
+         let id = result["handle"]
+             .as_str()
+@@ -551,7 +553,7 @@ fn parse_capture(
+     let expected = if stage == "hero" {
+         vec!["hero"]
+     } else {
+-        vec!["desktop", "mobile"]
++        r.devices.iter().map(|d| d.name()).collect()
+     };
+     let frames = result["frames"]
+         .as_array()
+@@ -577,7 +579,7 @@ fn parse_capture(
+                 }
+             } else {
+                 // Mobile measures only the first raster region (see entry_capture).
+-                let wanted = if name == "mobile" { &raster[..1] } else { &raster[..] };
++                let wanted = if name != "hero" && name != r.devices[0].name() { &raster[..1] } else { &raster[..] };
+                 // Every receipt must name its region: one without an id is malformed, not skipped.
+                 let mut got: Vec<Option<&str>> = receipts.iter().map(|g| g["regionId"].as_str()).collect();
+                 got.sort_unstable();
+@@ -755,6 +757,7 @@ mod parse_tests {
+             spec: SPEC.into(),
+             reference: "comp.png".into(),
+             stage: EntryStage::Hero,
++            devices: impeccable_comp_verbs::web_devices::parse(Some("desktop,mobile")).unwrap(),
+         };
+         let canonical = std::fs::canonicalize(&dir).unwrap();
+         let mut report = json!({"stage":"hero","artifact":"index.html",
+diff --git a/crates/cli/src/entry_capture.rs b/crates/cli/src/entry_capture.rs
+index aeae7de..77ee977 100644
+--- a/crates/cli/src/entry_capture.rs
++++ b/crates/cli/src/entry_capture.rs
+@@ -118,16 +118,8 @@ impl CdpEntryRenderer {
+         }
+         let frames: Vec<(&str, Option<[u32; 2]>)> = match request.stage {
+             EntryStage::Hero => vec![("hero", None)],
+-            EntryStage::Responsive => vec![
+-                (
+-                    "desktop",
+-                    Some([1440, (height * 1440. / width).ceil() as u32]),
+-                ),
+-                (
+-                    "mobile",
+-                    Some([390, 844.max((height * 390. / width).ceil() as u32)]),
+-                ),
+-            ],
++            EntryStage::Responsive => request.devices.iter()
++                .map(|d| (d.name(), Some(d.viewport(width, height)))).collect(),
+         };
+         if ids.is_empty() {
+             return capture_text_only(request, snapshot, &served, &frames, forbidden, clock);
+@@ -139,7 +131,7 @@ impl CdpEntryRenderer {
+         for (name, viewport) in frames {
+             // Mobile is captured as actual page evidence; the desktop comp does
+             // not prescribe mobile artwork positions. Do not score its placements.
+-            let selected = if name == "mobile" {
++            let selected = if name != request.devices[0].name() && name != "hero" {
+                 &ids[..1]
+             } else {
+                 &ids[..]
+diff --git a/crates/cli/src/reviewed_entry.rs b/crates/cli/src/reviewed_entry.rs
+index ce0315a..08d0b6c 100644
+--- a/crates/cli/src/reviewed_entry.rs
++++ b/crates/cli/src/reviewed_entry.rs
+@@ -184,6 +184,7 @@ impl EntryRenderer for ReviewedEntryRenderer {
+                 spec: r.spec.clone(),
+                 reference: r.reference.clone(),
+                 stage: r.stage,
++                devices: r.devices.clone(),
+             },
+         }))
+     }
+@@ -249,6 +250,7 @@ mod tests {
+             spec: "spec.json".into(),
+             reference: "comp.png".into(),
+             stage: impeccable_comp_verbs::entry_capture::EntryStage::Responsive,
++            devices: impeccable_comp_verbs::web_devices::parse(None).unwrap(),
+         };
+         assert_eq!(
+             reference(&session, &request).unwrap().png,
+diff --git a/crates/cli/tests/entry_capture.rs b/crates/cli/tests/entry_capture.rs
+index ee8838f..c1ad969 100644
+--- a/crates/cli/tests/entry_capture.rs
++++ b/crates/cli/tests/entry_capture.rs
+@@ -44,6 +44,7 @@ impl Fixture {
+             spec: ".impeccable/spec.json".into(),
+             reference: ".impeccable/comp.png".into(),
+             stage,
++            devices: impeccable_comp_verbs::web_devices::parse(Some("desktop,mobile")).unwrap(),
+         }
+     }
+ }
+diff --git a/crates/cli/tests/text_only_entry.rs b/crates/cli/tests/text_only_entry.rs
+index 164c637..6270839 100644
+--- a/crates/cli/tests/text_only_entry.rs
++++ b/crates/cli/tests/text_only_entry.rs
+@@ -63,6 +63,7 @@ impl Fixture {
+             spec: SPEC.into(),
+             reference: "comp.png".into(),
+             stage,
++            devices: impeccable_comp_verbs::web_devices::parse(Some("desktop,mobile")).unwrap(),
+         }
+     }
+     /// `build-phase` in process, the way the binary wires it for a standalone
+@@ -141,6 +142,24 @@ fn browser_available() -> bool {
+     true
+ }
+ 
++#[test]
++fn responsive_capture_uses_only_requested_devices() {
++    if !browser_available() { return; }
++    let fixture = Fixture::new();
++    for scope in ["desktop", "tablet", "mobile", "desktop,mobile"] {
++        let mut request = fixture.request(EntryStage::Responsive);
++        request.devices = impeccable_comp_verbs::web_devices::parse(Some(scope)).unwrap();
++        let capture = CdpEntryRenderer.capture_entry(&request).unwrap();
++        let frames = &capture.evidence().frames;
++        assert_eq!(frames.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
++            request.devices.iter().map(|d| d.name()).collect::<Vec<_>>());
++        for (frame, device) in frames.iter().zip(&request.devices) {
++            let image = png_io::decode_png(&frame.png).unwrap().image;
++            assert_eq!(image.width, device.width() as usize);
++        }
++    }
++}
++
+ #[test]
+ fn text_only_entry_captures_every_frame_without_region_receipts() {
+     if !browser_available() {
+diff --git a/crates/comp-verbs/src/build_phase/device_scope_tests.rs b/crates/comp-verbs/src/build_phase/device_scope_tests.rs
+new file mode 100644
+index 0000000..5c55765
+--- /dev/null
++++ b/crates/comp-verbs/src/build_phase/device_scope_tests.rs
+@@ -0,0 +1,122 @@
++use super::*;
++use crate::web_devices::{self, WebDevice};
++
++#[test]
++fn desktop_gate_passes_without_a_mobile_capture() {
++    let ws = menu_workspace();
++    std::fs::rename(
++        ws.path.join(".impeccable/review/mobile.png"),
++        ws.path.join(".impeccable/review/desktop.png"),
++    )
++    .unwrap();
++    let mut state = json!({"comp":"comp.png","phases":{}});
++    let gate = gate_responsive(&ws.io(), &mut state, 0.1, "diff", None);
++    assert!(gate.ok, "{:?}", gate.reasons);
++    state["deviceClasses"] = json!(["desktop", "mobile"]);
++    let gate = gate_responsive(&ws.io(), &mut state, 0.1, "diff", None);
++    assert!(!gate.ok);
++    assert!(gate
++        .reasons
++        .iter()
++        .any(|r| r.contains("no .impeccable/review/mobile.png")));
++}
++
++#[test]
++fn mobile_only_gate_does_not_require_desktop() {
++    let ws = menu_workspace();
++    let mut state = json!({"comp":"comp.png","phases":{},"deviceClasses":["mobile"]});
++    let gate = gate_responsive(&ws.io(), &mut state, 0.1, "diff", None);
++    assert!(gate.ok, "{:?}", gate.reasons);
++    assert!(gate.summary.unwrap().starts_with("mobile "));
++}
++
++#[test]
++fn tablet_only_gate_does_not_require_phone_or_desktop() {
++    let ws = menu_workspace();
++    std::fs::rename(
++        ws.path.join(".impeccable/review/mobile.png"),
++        ws.path.join(".impeccable/review/tablet.png"),
++    )
++    .unwrap();
++    let mut state = json!({"comp":"comp.png","phases":{},"deviceClasses":["tablet"]});
++    let gate = gate_responsive(&ws.io(), &mut state, 0.1, "diff", None);
++    assert!(gate.ok, "{:?}", gate.reasons);
++    assert!(gate.summary.unwrap().starts_with("tablet "));
++}
++
++#[test]
++fn start_persists_only_the_requested_devices() {
++    for value in [None, Some("mobile"), Some("desktop,tablet,mobile")] {
++        let ws = Workspace::new();
++        let mut io = ws.io();
++        let mut args = vec!["start", "--direction", "test"];
++        if let Some(value) = value {
++            args.extend(["--devices", value]);
++        }
++        assert_eq!(
++            run(
++                &args.into_iter().map(String::from).collect::<Vec<_>>(),
++                &mut io,
++                &no_organic_scan
++            ),
++            0
++        );
++        let state = load_state(&io).unwrap();
++        assert_eq!(
++            web_devices::from_state(&state).unwrap(),
++            web_devices::parse(value).unwrap()
++        );
++    }
++}
++
++struct ScopedRenderer {
++    devices: Vec<WebDevice>,
++    png: Vec<u8>,
++}
++impl EntryRenderer for ScopedRenderer {
++    fn capture_entry(&self, request: &EntryRequest) -> Result<Box<dyn CapturedEntry>, String> {
++        assert_eq!(request.devices, self.devices);
++        let frames = request
++            .devices
++            .iter()
++            .map(|d| crate::entry_capture::FrameEvidence {
++                name: d.name().into(),
++                png: self.png.clone(),
++                regions: vec![],
++            })
++            .collect();
++        Ok(Box::new(ReviewedCapture(
++            crate::entry_capture::EntryEvidence {
++                report: json!({}),
++                frames,
++            },
++            None,
++        )))
++    }
++}
++
++#[test]
++fn native_capture_requests_and_retains_only_scoped_frames() {
++    for value in ["desktop", "mobile", "tablet", "desktop,mobile"] {
++        let ws = menu_workspace();
++        let devices = web_devices::parse(Some(value)).unwrap();
++        let mut state = json!({"comp":"comp.png","phases":{},"capturePolicy":"native-html-v1","deviceClasses":devices});
++        let renderer = ScopedRenderer {
++            devices: devices.clone(),
++            png: std::fs::read(ws.path.join("comp.png")).unwrap(),
++        };
++        let gate = gate_responsive(&ws.io(), &mut state, 0.1, "diff", Some(&renderer));
++        assert!(gate.ok, "{:?}", gate.reasons);
++        for device in [WebDevice::Desktop, WebDevice::Tablet, WebDevice::Mobile] {
++            assert_eq!(
++                ws.path
++                    .join(format!(
++                        ".impeccable/review/native/responsive/{}.png",
++                        device.name()
++                    ))
++                    .exists(),
++                devices.contains(&device)
++            );
++        }
++    }
++}
+diff --git a/crates/comp-verbs/src/build_phase/integrity_tests.rs b/crates/comp-verbs/src/build_phase/integrity_tests.rs
+index 7bc43a8..40c7d54 100644
+--- a/crates/comp-verbs/src/build_phase/integrity_tests.rs
++++ b/crates/comp-verbs/src/build_phase/integrity_tests.rs
+@@ -1,5 +1,8 @@
+ use super::*;
+ 
++#[path = "device_scope_tests.rs"]
++mod device_scope_tests;
++
+ #[test]
+ fn completion_is_scoped_and_detects_post_finish_edits() {
+     let ws = Workspace::new();
+@@ -1606,7 +1609,7 @@ fn screenshot_policy_finish_binds_no_capture_manifest() {
+     assert!(state["finish"]["captureInputs"].is_null());
+     assert_eq!(crate::completion::report(&ws.path, Some(&state), None)["status"], "complete");
+     let next = next_instruction(&io, &state);
+-    assert!(next.contains("recapture desktop and mobile and advance responsive first"), "{next}");
++    assert!(next.contains("recapture desktop and advance responsive first"), "{next}");
+ }
+ 
+ #[test]
+diff --git a/crates/comp-verbs/src/build_phase.rs b/crates/comp-verbs/src/build_phase.rs
+index 1f66dad..1271011 100644
+--- a/crates/comp-verbs/src/build_phase.rs
++++ b/crates/comp-verbs/src/build_phase.rs
+@@ -23,6 +23,7 @@ use crate::comp_spec::{load_spec, prepare_plate_reference, PlateReference, BUILD
+ use crate::displacement::{Displacement, Rect as DRect};
+ use crate::font_match::choice_stamped;
+ use crate::entry_capture::{CapturedEntry, EntryRenderer, EntryRequest, EntryStage};
++use crate::web_devices;
+ use crate::util::{self, arg, flag, round, to_fixed};
+ 
+ pub const PHASES: [&str; 8] =
+@@ -1274,6 +1275,7 @@ fn prepare_native_capture(
+             spec: SPEC_PATH.into(),
+             reference,
+             stage,
++            devices: web_devices::from_state(state).map_err(|e| Gate::fail(vec![e]))?,
+         })
+         .map_err(|e| Gate::fail(vec![format!("native entry capture unavailable: {e}")]))?;
+     let directory = format!(
+@@ -1287,7 +1289,7 @@ fn prepare_native_capture(
+         std::fs::create_dir_all(abs(io, &directory)).map_err(|e| e.to_string())?;
+         if let Some(approved)=capture.approved_reference(){std::fs::write(abs(io,&format!("{directory}/human-approved.png")),&approved.png).map_err(|e|e.to_string())?;}
+         for frame in &capture.evidence().frames {
+-            if !matches!(frame.name.as_str(), "hero" | "desktop" | "mobile") {
++            if !matches!(frame.name.as_str(), "hero" | "desktop" | "tablet" | "mobile") {
+                 return Err("unknown native capture frame".into());
+             }
+             std::fs::write(
+@@ -1411,7 +1413,7 @@ fn finish_native_capture(io: &Io, out_dir: &str, gate: &mut Gate, native: &Nativ
+     for frame in &native.capture.evidence().frames {
+         // Mobile has no approved mobile comp. Capture its actual pixels, but do
+         // not pretend the desktop's positions constrain its reflow.
+-        if frame.name == "mobile" {
++        if frame.name != native.capture.evidence().frames[0].name {
+             continue;
+         }
+         for region in &frame.regions {
+@@ -2357,6 +2359,8 @@ const RESPONSIVE_ATTEMPTS: usize = 3;
+ /// RESPONSIVE_ATTEMPTS times in a row: the same route the hero takes, so a
+ /// stalled desktop width reaches the user instead of a recorded `fix`.
+ fn responsive_loop_verdict(state: &mut Value, gate: &Gate, viewport_accepted: bool, s: &str) -> Option<String> {
++    let device = web_devices::from_state(state).ok().and_then(|d| d.first().copied())
++        .map(|d| d.name()).unwrap_or("scoped");
+     let phase = state.pointer_mut("/phases/responsive")?.as_object_mut()?;
+     let mut history: Vec<Value> = phase.get("history").and_then(Value::as_array).cloned().unwrap_or_default();
+     history.push(json!({ "at": now(), "score": gate.score.map(util::num).unwrap_or(Value::Null), "worstIds": gate.worst_ids, "blockingReasons": gate.reasons }));
+@@ -2372,9 +2376,9 @@ fn responsive_loop_verdict(state: &mut Value, gate: &Gate, viewport_accepted: bo
+     let lead = format!("The responsive gate has failed {RESPONSIVE_ATTEMPTS} attempts in a row.");
+     let side = gate.side_by_side.as_deref().unwrap_or(".impeccable/review/diff/desktop/side-by-side.png");
+     if viewport_accepted {
+-        return Some(format!("{lead} The user already accepted a first viewport, so that review is closed. Stop iterating: show the user {side} with the regions below, and ask them to choose between restoring those regions at desktop width and keeping the desktop first viewport as it renders. Keeping it downgrades the comp at desktop width, so it takes their words saying so, quoted in {s} build-phase advance --force --reason (for example: the user said: \"the comp does not need to match at desktop width\"); force refuses any other reason. Until they answer, this phase stays open; a finish recorded over it is an unfinished build, not a fix round."));
++        return Some(format!("{lead} The user already accepted a first viewport, so that review is closed. Stop iterating: show the user {side} with the regions below, and ask them to choose between restoring those regions at {device} width and keeping the {device} first viewport as it renders. Keeping it downgrades the comp at {device} width, so it takes their words saying so, quoted in {s} build-phase advance --force --reason (for example: the user said: \"the comp does not need to match at {device} width\"); force refuses any other reason. Until they answer, this phase stays open; a finish recorded over it is an unfinished build, not a fix round."));
+     }
+-    Some(format!("{lead} Stop iterating and present the first-viewport review (the assembled hero, stage hero, in component-review.md) with the current page, so the user judges the first viewport in context. An accepted review carries to desktop width while the desktop capture still matches the approved screenshot; displaced and missing regions still block. Until then this phase stays open; a finish recorded over it is an unfinished build, not a fix round."))
++    Some(format!("{lead} Stop iterating and present the first-viewport review (the assembled hero, stage hero, in component-review.md) with the current page, so the user judges the first viewport in context. An accepted review carries to {device} width while the {device} capture still matches the approved screenshot; displaced and missing regions still block. Until then this phase stays open; a finish recorded over it is an unfinished build, not a fix round."))
+ }
+ 
+ /// The `{path, sha256}` rows of the manifest the last native responsive capture
+@@ -2423,16 +2427,22 @@ fn gate_responsive(io: &Io, state: &mut Value, min: f64, out_dir: &str, renderer
+ }
+ 
+ fn gate_responsive_inner(io: &Io, state: &mut Value, min: f64, out_dir: &str, native: Option<&NativeCapture>) -> Gate {
+-    let native_desktop=native.map(|n|n.path("desktop"));
+-    let native_mobile=native.map(|n|n.path("mobile"));
+-    let desktop = native_desktop.as_deref().unwrap_or(".impeccable/review/desktop.png");
+-    let mobile = native_mobile.as_deref().unwrap_or(".impeccable/review/mobile.png");
++    let devices = match web_devices::from_state(state) {
++        Ok(devices) => devices,
++        Err(error) => return Gate::fail(vec![error]),
++    };
++    let primary = devices[0].name();
++    let paths: Vec<_> = devices.iter().map(|d| {
++        let path = native.map(|n| n.path(d.name()))
++            .unwrap_or_else(|| format!(".impeccable/review/{}.png", d.name()));
++        (*d, path)
++    }).collect();
++    let capture = paths[0].1.as_str();
+     let mut reasons = Vec::new();
+-    if !abs(io, desktop).exists() {
+-        reasons.push(format!("no {desktop}: capture the page at a common desktop width (1440 wide, full page) into that path"));
+-    }
+-    if !abs(io, mobile).exists() {
+-        reasons.push(format!("no {mobile}: capture the page at 390 wide, full page, into that path"));
++    for (device, path) in &paths {
++        if !abs(io, path).is_file() {
++            reasons.push(format!("no {path}: capture the page at {} wide, full page, into that path", device.width()));
++        }
+     }
+     if !reasons.is_empty() {
+         return Gate::fail(reasons);
+@@ -2442,15 +2452,15 @@ fn gate_responsive_inner(io: &Io, state: &mut Value, min: f64, out_dir: &str, na
+     let spec = load_spec(&abs(io, SPEC_PATH));
+     if let Some(failure) = revalidate_plates(io, state, spec.as_ref()) { return failure; }
+     let comp_path = state.get("comp").and_then(Value::as_str).unwrap_or("");
+-    let (mut report, mut measured) = match hero_diff_labeled(io, comp_path, desktop, spec.as_ref(), out_dir, "desktop") {
++    let (mut report, mut measured) = match hero_diff_labeled(io, comp_path, capture, spec.as_ref(), out_dir, primary) {
+         Ok(r) => r,
+-        Err(e) => return Gate::fail(vec![format!("comp-diff failed on {desktop}: {e}")]),
++        Err(e) => return Gate::fail(vec![format!("comp-diff failed on {capture}: {e}")]),
+     };
+     let mut regions: Vec<Value> = report.get("regions").and_then(Value::as_array).cloned().unwrap_or_default();
+     // Where a region went when it is not at its box: the comp, and the capture at
+     // the comp's width with its full height (a full-page capture keeps what lies
+     // below the first viewport; a native frame is the first viewport alone).
+-    let images = load_raster(io, comp_path).ok().zip(load_raster(io, desktop).ok());
++    let images = load_raster(io, comp_path).ok().zip(load_raster(io, capture).ok());
+     let frame = images.as_ref().map(|(comp, capture)| {
+         let k = capture.width as f64 / comp.width as f64;
+         let tall = r::resize(capture, comp.width as f64, round(capture.height as f64 / k));
+@@ -2504,7 +2514,7 @@ fn gate_responsive_inner(io: &Io, state: &mut Value, min: f64, out_dir: &str, na
+         }
+         match locate(region) {
+             Some(d) if d.beyond_frame() => {
+-                let message = displaced_message(&id, &d, k, &frame_size);
++                let message = displaced_message(&id, &d, k, &frame_size, primary);
+                 region["verdict"] = json!("displaced");
+                 region["verdictReason"] = json!("present, but displaced past the first viewport");
+                 region["displacement"] = displacement_json(&d, k);
+@@ -2514,14 +2524,14 @@ fn gate_responsive_inner(io: &Io, state: &mut Value, min: f64, out_dir: &str, na
+                 region["verdict"] = json!("drift");
+                 region["verdictReason"] = json!("present, displaced inside the first viewport");
+                 region["displacement"] = displacement_json(&d, k);
+-                advisories.push(format!("(advisory, still inside the first viewport) at desktop width, region {id} sits {} than in the comp", offset_words(d.dx * k, d.dy * k)));
++                advisories.push(format!("(advisory, still inside the first viewport) at {primary} width, region {id} sits {} than in the comp", offset_words(d.dx * k, d.dy * k)));
+             }
+             None if present_plate => {
+                 region["verdict"] = json!("drift");
+-                region["verdictReason"] = json!("current plate passed asset validation and renders at desktop width away from its comp box");
+-                advisories.push(format!("(advisory) at desktop width, plate {id} renders but not at its comp box (structure {}%): size and position it to the spec box", pct0(rscore(region, "structure"))));
++                region["verdictReason"] = json!(format!("current plate passed asset validation and renders at {primary} width away from its comp box"));
++                advisories.push(format!("(advisory) at {primary} width, plate {id} renders but not at its comp box (structure {}%): size and position it to the spec box", pct0(rscore(region, "structure"))));
+             }
+-            None if verdict == "missing" => missing_reasons.push((id.clone(), format!("at desktop width, region {id} is missing"))),
++            None if verdict == "missing" => missing_reasons.push((id.clone(), format!("at {primary} width, region {id} is missing"))),
+             None => {}
+         }
+     }
+@@ -2530,24 +2540,26 @@ fn gate_responsive_inner(io: &Io, state: &mut Value, min: f64, out_dir: &str, na
+     // The approved first viewport at the desktop frame's own size. Its regions that
+     // still render as accepted (text, control, chrome) carry their acceptance here.
+     let accepted_view = native.and_then(|n| n.capture.approved_reference().map(|a| (n, a)))
+-        .and_then(|(n, a)| approved_at_frame(io, &n.path("human-approved"), desktop, spec.as_ref(), &format!("{out_dir}/human-reviewed")).ok().map(|(r, _)| (r, a.proof.clone())));
++        .and_then(|(n, a)| approved_at_frame(io, &n.path("human-approved"), capture, spec.as_ref(), &format!("{out_dir}/human-reviewed")).ok().map(|(r, _)| (r, a.proof.clone())));
+     let review = accepted_view.as_ref().map(|(comparison, _)| json!({"comparison": comparison}));
+     let viewport_accepted = human_accepted_viewport(review.as_ref());
+     let carried = human_accepted_regions(review.as_ref(), &regions);
+-    let mut lapse = lapsed_viewport(review.as_ref(), "desktop capture");
++    let mut lapse = lapsed_viewport(review.as_ref(), &format!("{primary} capture"));
+     if let Some((comparison, proof)) = &accepted_view {
+         report["humanTextReview"] = json!({"proof": proof, "comparison": comparison, "viewportAccepted": viewport_accepted,
+             "referenceScale": "the approved screenshot resampled once to the desktop frame; the capture is compared at its own size"});
+     }
+     if overall < min && viewport_accepted {
+-        advisories.push(format!("(advisory, first viewport accepted) the desktop capture scores {}% against the comp, under {}%", pct0(overall), pct0(min)));
++        advisories.push(format!("(advisory, first viewport accepted) the {primary} capture scores {}% against the comp, under {}%", pct0(overall), pct0(min)));
+     } else if overall < min && lapse.is_some() {
+-        advisories.push(format!("(measured) the desktop capture scores {}% against the comp, under {}%", pct0(overall), pct0(min)));
++        advisories.push(format!("(measured) the {primary} capture scores {}% against the comp, under {}%", pct0(overall), pct0(min)));
+         reasons.push(lapse.take().unwrap());
+     } else if overall < min {
+         let bp = state.get("breakpoint").and_then(Value::as_str).map(String::from).unwrap_or_else(|| "the comp size".into());
++        let guidance = if primary == "desktop" { "a common desktop width. The layout must hold from ~1280 up with fluid columns" }
++            else { "the requested device width. Keep the layout fluid within its scoped device class" };
+         reasons.push(format!(
+-            "the desktop capture ({}; its first viewport, the top {} rows at the comp's width, is compared) scores {}% against the comp, under {}%: the first viewport does not survive a common desktop width. The hero passed at {bp}; the layout must hold from ~1280 up, not only at the comp's exact width (grid columns in fr / minmax, not fixed px that overflow and wrap).",
++            "the {primary} capture ({}; its first viewport, the top {} rows at the comp's width, is compared) scores {}% against the comp, under {}%: the first viewport does not survive {guidance}. The hero passed at {bp}.",
+             report.get("buildSize").and_then(Value::as_str).unwrap_or(""),
+             report.get("compSize").and_then(Value::as_str).unwrap_or(""),
+             pct0(overall), pct0(min)
+@@ -2567,7 +2579,7 @@ fn gate_responsive_inner(io: &Io, state: &mut Value, min: f64, out_dir: &str, na
+     let contradicted_direction: Vec<Value> = regions.iter().filter(|r| r.get("verdict").and_then(Value::as_str) == Some("contradicted") && matches!(r.get("kind").and_then(Value::as_str), Some("text" | "control"))).cloned().collect();
+     for r in &contradicted_direction {
+         let id = r["id"].as_str().unwrap_or("");
+-        let message = format!("at desktop width, region {id} ({}) is contradicted (structure {}%)", r["kind"].as_str().unwrap_or(""), pct0(rscore(r, "structure")));
++        let message = format!("at {primary} width, region {id} ({}) is contradicted (structure {}%)", r["kind"].as_str().unwrap_or(""), pct0(rscore(r, "structure")));
+         if carried.contains(id) {
+             accepted_ids.push(json!(id));
+             advisories.push(format!("(advisory, accepted in the first-viewport review) {message}"));
+@@ -2585,8 +2597,8 @@ fn gate_responsive_inner(io: &Io, state: &mut Value, min: f64, out_dir: &str, na
+     if let Some(lapse) = lapse {
+         if reasons.is_empty() { advisories.insert(0, format!("(advisory) {lapse}")); } else { reasons.insert(0, lapse); }
+     }
+-    let mut g = if reasons.is_empty() { Gate::ok(format!("desktop {}% ({})", pct0(overall), report.get("verdict").and_then(Value::as_str).unwrap_or(""))) } else { Gate::fail(reasons) };
+-    g.summary = Some(format!("desktop {}% ({})", pct0(overall), report.get("verdict").and_then(Value::as_str).unwrap_or("")));
++    let mut g = if reasons.is_empty() { Gate::ok(format!("{primary} {}% ({})", pct0(overall), report.get("verdict").and_then(Value::as_str).unwrap_or(""))) } else { Gate::fail(reasons) };
++    g.summary = Some(format!("{primary} {}% ({})", pct0(overall), report.get("verdict").and_then(Value::as_str).unwrap_or("")));
+     g.score = Some(overall);
+     g.verdict = report.get("verdict").and_then(Value::as_str).map(String::from);
+     g.side_by_side = report.pointer("/files/sideBySide").and_then(Value::as_str).map(String::from);
+@@ -2617,13 +2629,13 @@ fn displacement_json(d: &Displacement, k: f64) -> Value {
+     json!({"dx": (d.dx * k).round(), "dy": (d.dy * k).round(), "visible": util::num((d.visible * 1000.).round() / 1000.), "inferred": d.inferred, "unit": "capture px"})
+ }
+ 
+-fn displaced_message(id: &str, d: &Displacement, k: f64, frame: &str) -> String {
++fn displaced_message(id: &str, d: &Displacement, k: f64, frame: &str, device: &str) -> String {
+     let fix = "Restore it into the first viewport: size what sits above it in proportion to the viewport (the comp's own ratios), not with fixed px or a px floor that grows it at this width";
+     if d.inferred {
+-        return format!("at desktop width, region {id} is displaced, not missing: the content above it in its column sits {} than in the comp, which pushes {id} out of the {frame} first viewport. {fix}.", offset_words(d.dx * k, d.dy * k));
++        return format!("at {device} width, region {id} is displaced, not missing: the content above it in its column sits {} than in the comp, which pushes {id} out of the {frame} first viewport. {fix}.", offset_words(d.dx * k, d.dy * k));
+     }
+     let shown = (d.visible * 100.).round() as i64;
+-    format!("at desktop width, region {id} is displaced, not missing: it renders {} than in the comp, and {} of it stays inside the {frame} first viewport. {fix}.",
++    format!("at {device} width, region {id} is displaced, not missing: it renders {} than in the comp, and {} of it stays inside the {frame} first viewport. {fix}.",
+         offset_words(d.dx * k, d.dy * k), if shown == 0 { "none".to_string() } else { format!("{shown}%") })
+ }
+ 
+@@ -2886,11 +2898,13 @@ fn advance(io: &Io, state: &mut Value, force: bool, reason: Option<&str>, opts:
+ // ---- guidance strings ------------------------------------------------------
+ 
+ /// What `finish --disposition ship` does with the current files, per capture policy.
+-fn ship_recheck(io: &Io, state: &Value) -> &'static str {
++fn ship_recheck(io: &Io, state: &Value) -> String {
+     if state["capturePolicy"] == "native-html-v1" || io.env("IMPECCABLE_NATIVE_CAPTURE") == Some("1") {
+-        "ship re-captures the current files natively and must pass the responsive gate again"
++        "ship re-captures the current files natively at the scoped devices and must pass the responsive gate again".into()
+     } else {
+-        "ship refuses while the frontend files differ from the responsive screenshots, so recapture desktop and mobile and advance responsive first"
++        let devices = web_devices::from_state(state).map(|d| web_devices::names(&d))
++            .unwrap_or_else(|e| e);
++        format!("ship refuses while the frontend files differ from the responsive screenshots, so recapture {devices} and advance responsive first")
+     }
+ }
+ 
+@@ -2935,15 +2949,23 @@ fn next_instruction(io: &Io, state: &Value) -> String {
+         "sections" => format!("Build the remaining sections inside the spec system (same corner language, rules, and palette; nothing the comp does not show). The hero passed with the comp's words verbatim; from here, content beyond the comp is yours to author at full fidelity, and any change to words the comp showed is a stated decision in your report, never silent. Then {s} build-phase advance."),
+         "motion" => format!("Add the signature interaction, reveals, and motion. Then {s} build-phase advance."),
+         "responsive" => {
+-            // The desktop frame keeps the comp's aspect at 1440 wide.
++            let devices = match web_devices::from_state(state) {
++                Ok(devices) => devices,
++                Err(error) => return error,
++            };
++            let primary = devices[0];
++            let primary_name = primary.name();
++            let width = primary.width();
+             let frame = bp.and_then(|b| b.split_once('x')).and_then(|(w, h)| Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?)))
+-                .filter(|(w, h)| *w > 0. && *h > 0.).map(|(w, h)| format!("1440x{}", (h * 1440. / w).ceil() as i64)).unwrap_or_else(|| "1440 wide at the comp's aspect".into());
++                .filter(|(w, h)| *w > 0. && *h > 0.).map(|(w, h)| format!("{width}x{}", (h * width as f64 / w).ceil() as i64)).unwrap_or_else(|| format!("{width} wide at the comp's aspect"));
+             let compared = if state["capturePolicy"] == "native-html-v1" || io.env("IMPECCABLE_NATIVE_CAPTURE") == Some("1") {
+-                format!("The gate renders the page itself, a {frame} desktop first viewport and a 390-wide mobile frame, and diffs that desktop first viewport against the comp (scaled to the comp's width); captures you save are for your own inspection.")
++                let additional = devices.iter().skip(1).map(|d| format!(" and a {}-wide {} frame", d.width(), d.name())).collect::<String>();
++                format!("The gate renders the page itself, a {frame} {primary_name} first viewport{additional}, and diffs that {primary_name} first viewport against the comp (scaled to the comp's width); captures you save are for your own inspection.")
+             } else {
+-                format!("Capture desktop.png (1440 wide, full page) and mobile.png (390 wide, full page) into .impeccable/review/; the gate diffs the first viewport of desktop.png (its top {frame}, scaled to the comp's width) against the comp.")
++                let captures = devices.iter().map(|d| format!("{}.png ({} wide, full page)", d.name(), d.width())).collect::<Vec<_>>().join(" and ");
++                format!("Capture {captures} into .impeccable/review/; the gate diffs the first viewport of {primary_name}.png (its top {frame}, scaled to the comp's width) against the comp.")
+             };
+-            format!("Build the other viewports (mobile first if the surface is mobile). The first viewport must hold at common desktop widths (1280 to 1600), not only at the comp's exact size: fluid columns, no fixed-px grid that wraps 96px narrower, and sizes that scale with the viewport so nothing the comp shows in the first viewport is pushed below it. Settle or disable entrance motion before capturing (an element mid-animation reads as missing). {compared} Then {s} build-phase advance. When it fails, open the region crops it lists first; after three failed attempts it names the route to the user instead of more edits.")
++            format!("Build the scoped {} viewports. Keep the comp's first-viewport content visible at the scoped sizes with fluid columns and proportional spacing. Settle or disable entrance motion before capturing (an element mid-animation reads as missing). {compared} Then {s} build-phase advance. When it fails, open the region crops it lists first; after three failed attempts it names the route to the user instead of more edits.", web_devices::names(&devices))
+         }
+         "review" => format!("Spawn the finish reviewer with the state file, the hero diff report, and the captures; record its disposition with {s} build-phase finish --disposition <word>. Make every fix before ship: {}, and any edit after it, a fix for a hook finding included, needs ship recorded again.", ship_recheck(io, state)),
+         _ => String::new(),
+@@ -3354,6 +3376,13 @@ pub fn run_with_renderer(argv: &[String],io: &mut Io,organic_scan: OrganicScan,r
+         return 0;
+     }
+     if cmd == "start" {
++        let devices = match web_devices::parse(arg(argv, "devices")) {
++            Ok(devices) if !flag(argv, "devices") || arg(argv, "devices").is_some() => devices,
++            _ => {
++                io.err("build-phase: --devices requires a comma-separated list of desktop, tablet, mobile\n");
++                return 1;
++            }
++        };
+         let comp = arg(argv, "comp");
+         let direction = arg(argv, "direction");
+         let chosen_decision = arg(argv, "decision-comp");
+@@ -3417,6 +3446,7 @@ pub fn run_with_renderer(argv: &[String],io: &mut Io,organic_scan: OrganicScan,r
+             None => crate::approved_comp::forget(io),
+         }
+         let mut state = new_state(comp, breakpoint.as_deref(), arg(argv, "artifact"), direction);
++        state["deviceClasses"] = json!(devices);
+         if let Some(d) = chosen_decision { state["decisionComp"] = json!(d); }
+         if io.env("IMPECCABLE_NATIVE_CAPTURE")==Some("1") {state["capturePolicy"]=json!("native-html-v1");}
+         // Session identity is transport metadata, never guessed from a project
+@@ -3607,7 +3637,8 @@ pub fn run_with_renderer(argv: &[String],io: &mut Io,organic_scan: OrganicScan,r
+                     state["phases"]["responsive"]["status"] = json!("open");
+                     state["phases"]["responsive"]["closedAt"] = Value::Null;
+                     save_state(io,&state);
+-                    io.err("build-phase: frontend inputs changed since the responsive screenshots were checked. Recapture desktop and mobile, then advance responsive before finish; this does not reopen human review.\n");
++                    let devices = web_devices::from_state(&state).map(|d| web_devices::names(&d)).unwrap_or_else(|e| e);
++                    io.err(&format!("build-phase: frontend inputs changed since the responsive screenshots were checked. Recapture {devices}, then advance responsive before finish; this does not reopen human review.\n"));
+                     return 2;
+                 }
+             }
+diff --git a/crates/comp-verbs/src/entry_capture.rs b/crates/comp-verbs/src/entry_capture.rs
+index 832777f..5ea806b 100644
+--- a/crates/comp-verbs/src/entry_capture.rs
++++ b/crates/comp-verbs/src/entry_capture.rs
+@@ -14,6 +14,7 @@ pub struct EntryRequest {
+     pub spec: String,
+     pub reference: String,
+     pub stage: EntryStage,
++    pub devices: Vec<crate::web_devices::WebDevice>,
+ }
+ pub struct FrameEvidence {
+     pub name: String,
+diff --git a/crates/comp-verbs/src/lib.rs b/crates/comp-verbs/src/lib.rs
+index 31c5077..3af4a91 100644
+--- a/crates/comp-verbs/src/lib.rs
++++ b/crates/comp-verbs/src/lib.rs
+@@ -53,3 +53,4 @@ pub fn run_build_phase(argv: &[String], io: &mut Io, organic_scan: build_phase::
+ pub mod asset_capture;
+ 
+ pub mod entry_capture;
++pub mod web_devices;
+diff --git a/crates/comp-verbs/src/web_devices.rs b/crates/comp-verbs/src/web_devices.rs
+new file mode 100644
+index 0000000..9a395c1
+--- /dev/null
++++ b/crates/comp-verbs/src/web_devices.rs
+@@ -0,0 +1,131 @@
++//! Explicit Web device scope shared by build gates and their capture adapter.
++use serde::{Deserialize, Serialize};
++use serde_json::Value;
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "lowercase")]
++pub enum WebDevice {
++    Desktop,
++    Tablet,
++    Mobile,
++}
++
++impl WebDevice {
++    pub fn name(self) -> &'static str {
++        match self {
++            Self::Desktop => "desktop",
++            Self::Tablet => "tablet",
++            Self::Mobile => "mobile",
++        }
++    }
++
++    pub fn width(self) -> u32 {
++        match self {
++            Self::Desktop => 1440,
++            Self::Tablet => 768,
++            Self::Mobile => 390,
++        }
++    }
++
++    pub fn viewport(self, width: f64, height: f64) -> [u32; 2] {
++        let h = (height * self.width() as f64 / width).ceil() as u32;
++        [
++            self.width(),
++            if self == Self::Mobile { h.max(844) } else { h },
++        ]
++    }
++}
++
++pub fn parse(value: Option<&str>) -> Result<Vec<WebDevice>, String> {
++    let mut devices = Vec::new();
++    for name in value.unwrap_or("desktop").split(',') {
++        let device = match name {
++            "desktop" => WebDevice::Desktop,
++            "tablet" => WebDevice::Tablet,
++            "mobile" => WebDevice::Mobile,
++            _ => {
++                return Err(
++                    "--devices requires a comma-separated list of desktop, tablet, mobile".into(),
++                )
++            }
++        };
++        if !devices.contains(&device) {
++            devices.push(device);
++        }
++    }
++    devices.sort_by_key(|d| std::cmp::Reverse(d.width()));
++    Ok(devices)
++}
++
++pub fn from_state(state: &Value) -> Result<Vec<WebDevice>, String> {
++    let Some(value) = state.get("deviceClasses") else {
++        return parse(None);
++    };
++    let devices: Vec<WebDevice> = serde_json::from_value(value.clone())
++        .map_err(|_| "invalid deviceClasses in build state")?;
++    if devices.is_empty() {
++        return Err("deviceClasses in build state is empty".into());
++    }
++    parse(Some(
++        &devices
++            .iter()
++            .map(|d| d.name())
++            .collect::<Vec<_>>()
++            .join(","),
++    ))
++}
++
++pub fn names(devices: &[WebDevice]) -> String {
++    devices
++        .iter()
++        .map(|d| d.name())
++        .collect::<Vec<_>>()
++        .join(" and ")
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use serde_json::json;
++
++    #[test]
++    fn default_and_old_states_are_desktop_only() {
++        assert_eq!(parse(None).unwrap(), vec![WebDevice::Desktop]);
++        assert_eq!(from_state(&json!({})).unwrap(), vec![WebDevice::Desktop]);
++    }
++
++    #[test]
++    fn only_explicit_device_classes_are_included() {
++        assert_eq!(parse(Some("mobile")).unwrap(), vec![WebDevice::Mobile]);
++        assert_eq!(
++            parse(Some("mobile,desktop,mobile")).unwrap(),
++            vec![WebDevice::Desktop, WebDevice::Mobile]
++        );
++        assert_eq!(
++            from_state(&json!({"deviceClasses":["mobile"]})).unwrap(),
++            vec![WebDevice::Mobile]
++        );
++        assert_eq!(
++            parse(None)
++                .unwrap()
++                .iter()
++                .map(|d| d.width())
++                .collect::<Vec<_>>(),
++            vec![1440]
++        );
++    }
++
++    #[test]
++    fn invalid_scope_cannot_silently_remove_required_checks() {
++        for value in ["", "phone", "desktop,", "desktop,moble"] {
++            assert!(parse(Some(value)).is_err());
++        }
++        for state in [
++            json!({"deviceClasses":[]}),
++            json!({"deviceClasses":["phone"]}),
++            json!({"deviceClasses":null}),
++        ] {
++            assert!(from_state(&state).is_err());
++        }
++    }
++}
