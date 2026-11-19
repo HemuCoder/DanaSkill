@@ -2,6 +2,14 @@
 
 可复用的个人 Codex Skills。
 
+## FDM 零件设计与打印配置
+
+设计外壳与装配接口，给已有模型配置打印朝向、支撑和 Bambu Studio 多盘 3MF。遇到试打问题时，可按缺陷位置核对 H2C 的支撑参数，或设计能复现装配条件的局部小样。[使用说明](fdm-design-print/SKILL.md)
+
+```sh
+npx skills add HemuCoder/DanaSkill --skill fdm-design-print
+```
+
 ## Impeccable 界面设计
 
 [impeccable](impeccable/SKILL.md) 提供界面设计、布局、审查与打磨流程。此处保存本机定制的 `4.5.2 / explicit-device-scope.1`：Web 默认只处理桌面，手机和平板仅在用户明确要求时加入；构建、截图和审查共用同一设备范围，验证按批次收敛。

@@ -1,0 +1,4 @@
+interface:
+  display_name: "FDM 零件设计与打印配置"
+  short_description: "为 FDM 零件设计配合与分件，配置打印盘、诊断试打缺陷并交付 3MF 工程"
+  default_prompt: "用 $fdm-design-print 帮我检查这个零件的打印朝向、支撑和装配配合。"
